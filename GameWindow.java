@@ -1,9 +1,19 @@
+import javax.sound.sampled.AudioSystem;
+import javax.sound.sampled.Mixer;
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.awt.image.BufferedImage;
+import java.io.File;
 
-public class GameWindow extends JPanel {
+public class GameWindow extends JPanel implements Runnable {
+
+    /**
+     * This section defines static constants that determine the
+     * look of the game window
+     */
+
 
     // constants defining size of game window and frame rate of the animation loop
     public static final int WINDOW_WIDTH = 800;
@@ -34,7 +44,7 @@ public class GameWindow extends JPanel {
     public static final String RIGHT_PADDLE_DOWN_RELEASE = "Right Paddle Move Down Release";
 
 
-    /**
+    /*
      * These are constants defining the speed at which the paddles move when pressed
      * as well as the sensitivity, or amount moved per frame, of the paddles.
      * These two quantities are related by the frame rate of the game window through
@@ -50,6 +60,12 @@ public class GameWindow extends JPanel {
     public static final int RIGHT_PADDLE_SENSITIVITY = RIGHT_PADDLE_SPEED/FRAME_RATE;
 
 
+
+    /**
+     * This section defines the private variables that allow
+     * the game to function
+     */
+
     // private variables for on screen entities
     private final PongBall ball;
     private final PongPaddle leftPaddle;
@@ -64,6 +80,15 @@ public class GameWindow extends JPanel {
     private GameComponentListener gameListener;
 
 
+    // private variable determines whether game is running or paused
+    private boolean isRunning = false;
+
+
+
+    /**
+     * This section defines the methods of the GameWindow class.
+     */
+
     public GameWindow() {
         //this.setSize(WINDOW_WIDTH, WINDOW_HEIGHT);
         this.ball = new PongBall(BALL_START_X_POSITION, BALL_START_Y_POSITION, BALL_RADIUS);
@@ -71,13 +96,12 @@ public class GameWindow extends JPanel {
         this.ball.setXVelocity(1);
         this.leftPaddle = new PongPaddle(LEFT_PADDLE_X, WINDOW_HEIGHT/2, PADDLE_WIDTH, PADDLE_HEIGHT);
         this.rightPaddle = new PongPaddle(RIGHT_PADDLE_X, WINDOW_HEIGHT/2, PADDLE_WIDTH, PADDLE_HEIGHT);
-        this.setBackground(Color.blue);
     }
 
     public void paint(Graphics g) {
         super.paint(g);
         Graphics2D g2 = (Graphics2D) g;
-        //g2.drawImage(backgroundImage, 0, 0, null);
+        g2.drawImage(backgroundImage, 0, 0, getWidth(), getHeight(), null);
         g2.fillRect(leftPaddle.getXPosition(), leftPaddle.getYPosition(), leftPaddle.getDimensions().getXDimension(), leftPaddle.getDimensions().getYDimension());
         g2.fillRect(rightPaddle.getXPosition(), rightPaddle.getYPosition(), rightPaddle.getDimensions().getXDimension(), rightPaddle.getDimensions().getYDimension());
         g2.fillOval(ball.getXPosition(), ball.getYPosition(), ball.getDimensions().getXDimension(), ball.getDimensions().getYDimension());
@@ -179,23 +203,26 @@ public class GameWindow extends JPanel {
         updateBall();
     }
 
-    public void start() {
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while (!Thread.interrupted()) {
-                    try {
-                        update();
-                        repaint();
-                        Thread.sleep(1000/FRAME_RATE);
-                    }
-                    catch (InterruptedException e) {
-                        System.out.print("Thread Interrupted!");
-                    }
+    @Override
+    public void run() {
+        try {
+            while (true) {
+                update();
+                repaint();
+                Thread.sleep(1000/FRAME_RATE);
 
+                synchronized (this) {
+                    while (!isRunning()) {
+                        wait();
+                    }
                 }
             }
-        }).start();
+        }
+        catch (Exception e) {
+
+        }
+
+
     }
 
     public void addLeftUpKey(final int upKey) {
@@ -282,8 +309,40 @@ public class GameWindow extends JPanel {
         });
     }
 
+    public void addToggleRunningKey(int keyCode) {
+        InputMap inputMap = this.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        inputMap.put(KeyStroke.getKeyStroke(keyCode, 0, true), "Toggle Running");
+
+        ActionMap actionMap = this.getActionMap();
+        actionMap.put("Toggle Running", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                if (isRunning()) {
+                    suspend();
+                }
+                else {
+                    resume();
+                }
+            }
+        });
+    }
+
     public void addGameListener(GameComponentListener listener) {
         this.gameListener = listener;
+    }
+
+
+    public synchronized void suspend() {
+        isRunning = false;
+    }
+
+    public synchronized void resume() {
+        isRunning = true;
+        notify();
+    }
+
+    public boolean isRunning() {
+        return this.isRunning;
     }
 
 
@@ -291,9 +350,20 @@ public class GameWindow extends JPanel {
         JFrame frame = new JFrame();
         frame.setLayout(null);
         GameWindow gameWindow = new GameWindow();
-        SideMenu menu = new SideMenu();
+        //SideMenu menu = new SideMenu(GameWindow.WINDOW_WIDTH, 0, 1200 - GameWindow.WINDOW_WIDTH, GameWindow.WINDOW_HEIGHT);
+        Scorecard scorecard = new Scorecard(GameWindow.WINDOW_WIDTH, 0, 1200 - GameWindow.WINDOW_WIDTH, 150);
         int leftPlayerScore = 0;
         int rightPlayerScore = 0;
+
+
+
+        File bounceSoundFile = new File("src/button-10.wav");
+        File scoreSoundFile = new File("src/crowd-applause.wav");
+        File backgroundImageFile = new File("src/Game-Background-Image-Forest.png");
+
+        BufferedImage backgroundImage = BackgroundImageManager.loadImage(backgroundImageFile);
+
+        gameWindow.setBackgroundImage(backgroundImage);
 
         gameWindow.addLeftUpKey(KeyEvent.VK_A);
         gameWindow.addLeftDownKey(KeyEvent.VK_Z);
@@ -301,41 +371,47 @@ public class GameWindow extends JPanel {
         gameWindow.addRightUpKey(KeyEvent.VK_K);
         gameWindow.addRightDownKey(KeyEvent.VK_M);
 
+        gameWindow.addToggleRunningKey(KeyEvent.VK_SPACE);
+
         gameWindow.addGameListener(new GameComponentListener() {
             @Override
             public void gameEventOccurred(GameComponentEvent gameEvent) {
                 if (gameEvent.getEventType() == GameComponentEvent.TOP_BOUNCE_EVENT) {
-                    System.out.print("bounced off of top\n");
+                    GameAudioManager.playSound(bounceSoundFile);
                 }
                 else if(gameEvent.getEventType() == GameComponentEvent.BOTTOM_BOUNCE_EVENT) {
-                    System.out.print("bounced off of bottom\n");
+                    GameAudioManager.playSound(bounceSoundFile);
                 }
                 else if (gameEvent.getEventType() == GameComponentEvent.LEFT_PADDLE_BOUNCE_EVENT) {
-                    System.out.print("bounced off of left paddle\n");
+                    GameAudioManager.playSound(bounceSoundFile);
                 }
                 else if (gameEvent.getEventType() == GameComponentEvent.RIGHT_PADDLE_BOUNCE_EVENT) {
-                    System.out.print("bounced off of right paddle\n");
+                    GameAudioManager.playSound(bounceSoundFile);
                 }
                 else if (gameEvent.getEventType() == GameComponentEvent.LEFT_SCORE_EVENT) {
-                    System.out.print("right player scored (ball hit left side of screen)\n");
+                    GameAudioManager.playSound(scoreSoundFile);
+                    scorecard.incrementPlayerTwoScore();
                 }
                 else if (gameEvent.getEventType() == GameComponentEvent.RIGHT_SCORE_EVENT) {
-                    System.out.print("left player scored (ball hit right side of screen)\n");
+                    GameAudioManager.playSound(scoreSoundFile);
+                    scorecard.incrementPlayerOneScore();
                 }
             }
         });
-        
-        //gameWindow.setBackgroundImage(Background_Image_Pong.jpg);
+
 
         gameWindow.setBounds(0, 0, GameWindow.WINDOW_WIDTH, GameWindow.WINDOW_HEIGHT);
-        gameWindow.start();
 
-        menu.setBounds(GameWindow.WINDOW_WIDTH, 0, 1200 - WINDOW_WIDTH, WINDOW_HEIGHT);
+
+
+        //menu.setBounds(GameWindow.WINDOW_WIDTH, 0, 1200 - WINDOW_WIDTH, WINDOW_HEIGHT);
 
         frame.add(gameWindow);
+        frame.add(scorecard);
         //frame.add(menu);
         frame.setSize(1200, 700);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setVisible(true);
+        gameWindow.run();
     }
 }
